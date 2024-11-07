@@ -36,7 +36,9 @@
       "path": "@commitlint/cz-commitlint"
     }
   },
-  "dependencies": {},
+  "dependencies": {
+    "or": "^0.2.0"
+  },
   "devDependencies": {
     "@commitlint/cli": "^17.0.0",
     "@commitlint/config-angular": "^17.0.0",
@@ -58,7 +60,7 @@
     "@types/react-router-dom": "^5.1.8",
     "@types/react-toastify": "^4.1.0",
     "@types/styled-components": "^5.1.11",
-    "axios": "^0.27.0",
+    "axios": "^1.7.7",
     "commitizen": "^4.2.4",
     "conventional-changelog-cli": "^2.1.1",
     "cross-env": "^7.0.3",
@@ -74,9 +76,9 @@
     "react-feather": "^2.0.9",
     "react-json-csv": "^2.0.0",
     "react-router-dom": "^5.3.0",
-    "react-scripts": "5.0.1",
+    "react-scripts": "^3.0.1",
     "react-toastify": "^9.0.0",
-    "release-it": "^15.0.0",
+    "release-it": "^17.10.0",
     "serialize-javascript": "^6.0.0",
     "socket.io-client": "^4.0.0",
     "styled-components": "^5.2.1",
