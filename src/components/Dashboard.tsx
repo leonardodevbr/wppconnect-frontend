@@ -17,6 +17,8 @@ import {
   QuestionMarkCircleIcon,
   ExclamationTriangleIcon,
   QrCodeIcon,
+  ArrowPathIcon,
+  TrashIcon,
 } from '@heroicons/react/24/outline';
 
 // Tipos inline para evitar problemas de importação
@@ -60,6 +62,7 @@ const Dashboard: React.FC = () => {
   const [showInstanceDetails, setShowInstanceDetails] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false);
   const [qrCodeData, setQrCodeData] = useState<string | null>(null);
+  const [loadingInstances, setLoadingInstances] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadData();
@@ -160,6 +163,8 @@ const Dashboard: React.FC = () => {
   };
 
   const startInstance = async (instance: Instance) => {
+    const key = instance.id;
+    setLoadingInstances((prev) => ({ ...prev, [key]: true }));
     try {
       const response = await apiService.startInstance(instance.id, instance.token);
       
@@ -189,6 +194,41 @@ const Dashboard: React.FC = () => {
     } catch (error) {
       console.error('Erro ao iniciar instância:', error);
       alert('Erro ao iniciar instância');
+    } finally {
+      setLoadingInstances((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const deleteInstance = async (instance: Instance) => {
+    if (!confirm(`Excluir a instância "${instance.name}"?`)) return;
+
+    try {
+      const response = await apiService.deleteInstance(instance.id);
+      if (response.status === 'success') {
+        setInstances((prev) => prev.filter((i) => i.id !== instance.id));
+        setStats((prev) => {
+          const newTotal = Math.max(0, prev.totalInstances - 1);
+          const newConnected =
+            instance.status === 'connected'
+              ? Math.max(0, prev.connectedInstances - 1)
+              : prev.connectedInstances;
+          return {
+            ...prev,
+            totalInstances: newTotal,
+            connectedInstances: newConnected,
+            disconnectedInstances: newTotal - newConnected,
+          };
+        });
+        if (selectedInstance?.id === instance.id) {
+          setShowInstanceDetails(false);
+          setSelectedInstance(null);
+        }
+      } else {
+        alert(response.message || 'Erro ao excluir instância');
+      }
+    } catch (error) {
+      console.error('Erro ao excluir instância:', error);
+      alert('Erro ao excluir instância');
     }
   };
 
@@ -603,18 +643,30 @@ const Dashboard: React.FC = () => {
                               </button>
                             ) : (
                               <button
+                                type="button"
+                                disabled={loadingInstances[instance.id]}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   startInstance(instance);
                                 }}
-                                className="btn-success flex items-center space-x-1"
+                                className="btn-success flex items-center space-x-1 disabled:opacity-60 disabled:cursor-not-allowed"
                               >
-                                <PlayIcon className="w-4 h-4" />
-                                <span>Iniciar</span>
+                                {loadingInstances[instance.id] ? (
+                                  <>
+                                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                    <span>Iniciando...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <PlayIcon className="w-4 h-4" />
+                                    <span>Iniciar</span>
+                                  </>
+                                )}
                               </button>
                             )}
                             {(instance.status === 'connecting' || instance.status === 'disconnected') && (
                               <button
+                                type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   showQrCodeForInstance(instance);
@@ -625,6 +677,18 @@ const Dashboard: React.FC = () => {
                                 <span>QR Code</span>
                               </button>
                             )}
+                            <button
+                              type="button"
+                              title="Excluir instância"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteInstance(instance);
+                              }}
+                              className="btn-danger flex items-center justify-center p-2"
+                              aria-label="Excluir instância"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
                           </div>
                         </td>
                       </tr>

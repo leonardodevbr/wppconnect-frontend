@@ -242,26 +242,30 @@ class ApiService {
       }
 
       const bearerToken = gen.data.token;
-      await this.api.post(
-        `/${encodeURIComponent(session)}/start-session`,
-        { waitQrCode: true, webhook: webhook || '' },
-        {
-          headers: { Authorization: `Bearer ${bearerToken}` },
-          timeout: 120000,
-        }
-      );
 
-      const qr = await this.getInstanceQrCode(session, bearerToken);
-      const qrcode =
-        qr.status === 'success' && qr.data?.qrcode ? qr.data.qrcode : undefined;
+      // Disparar start-session sem aguardar (fire and forget)
+      this.api
+        .post(
+          `/${encodeURIComponent(session)}/start-session`,
+          { waitQrCode: false, webhook: webhook || '' },
+          {
+            headers: { Authorization: `Bearer ${bearerToken}` },
+            timeout: 10000, // só para enviar a requisição, não aguarda conclusão
+          }
+        )
+        .catch(() => {}); // ignorar timeout — o WPPConnect processa em background
 
+      // Aguardar um pouco para o Chromium inicializar
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // Retornar sucesso imediatamente — QR virá via polling
       return {
         status: 'success',
         data: {
           name: session,
           full: gen.data.full,
-          status: qr.data?.sessionStatus || qr.data?.status || 'QRCODE',
-          qrcode,
+          status: 'INITIALIZING',
+          qrcode: null,
         },
       };
     } catch (error: any) {
@@ -345,11 +349,16 @@ class ApiService {
 
   async startInstance(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
-      const response = await this.api.post(`/${sessionName}/start`, {}, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      const response = await this.api.post(
+        `/${encodeURIComponent(sessionName)}/start`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          timeout: 120000,
         }
-      });
+      );
       
       console.log('Resposta raw do backend:', response.data);
       
@@ -372,6 +381,18 @@ class ApiService {
       return response.data;
     } catch (error: any) {
       return { status: 'error', message: error.response?.data?.message || 'Erro ao parar instância' };
+    }
+  }
+
+  async deleteInstance(sessionName: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.api.delete(`/instances/${encodeURIComponent(sessionName)}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Erro ao excluir instância',
+      };
     }
   }
 }
