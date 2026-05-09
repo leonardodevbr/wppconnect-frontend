@@ -1,7 +1,10 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-const SECRET_KEY = 'THISISMYSECURETOKEN';
+/** Mesmo valor que SECRET_KEY no backend (Railway). No Vercel: Environment Variables → VITE_SECRET_KEY */
+const SECRET_KEY =
+  import.meta.env.VITE_SECRET_KEY?.trim() ||
+  (import.meta.env.DEV ? 'THISISMYSECURETOKEN' : '');
 
 // Tipos básicos
 interface User {
