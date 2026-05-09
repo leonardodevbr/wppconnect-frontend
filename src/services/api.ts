@@ -337,41 +337,28 @@ class ApiService {
     }
   }
 
-  async startInstance(sessionName: string, _token: string): Promise<ApiResponse<any>> {
+  async startInstance(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
-      const gen = await this.generateToken(sessionName);
-      if (gen.status !== 'success' || !gen.data?.token) {
-        return { status: 'error', message: 'Erro ao gerar token da sessão' };
-      }
+      // Disparar start-session SEM aguardar resposta (exatamente como: curl ... &)
+      const base = this.api.defaults.baseURL || '';
+      fetch(`${base}/${encodeURIComponent(sessionName)}/start-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ waitQrCode: false }),
+      }).catch(() => {});
 
-      const bearerToken = gen.data.token;
-
-      // Fire and forget — não aguardar resposta
-      this.api
-        .post(
-          `/${encodeURIComponent(sessionName)}/start-session`,
-          { waitQrCode: false, webhook: '' },
-          {
-            headers: { Authorization: `Bearer ${bearerToken}` },
-            timeout: 10000,
-          }
-        )
-        .catch(() => {});
-
-      // Aguardar Chromium inicializar no Railway (~25s)
-      await new Promise((resolve) => setTimeout(resolve, 25000));
+      // Aguardar 8 segundos (exatamente como: sleep 8)
+      await new Promise((resolve) => setTimeout(resolve, 8000));
 
       return {
         status: 'success',
-        data: {
-          name: sessionName,
-          status: 'INITIALIZING',
-          qrcode: null,
-          token: bearerToken,
-        },
+        data: { name: sessionName, status: 'INITIALIZING', qrcode: null, token },
       };
     } catch (error: any) {
-      return { status: 'error', message: error.message || 'Erro ao iniciar instância' };
+      return { status: 'error', message: error.message || 'Erro ao iniciar' };
     }
   }
 

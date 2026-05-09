@@ -256,10 +256,22 @@ const Dashboard: React.FC = () => {
     );
 
     try {
-      const response = await apiService.startInstance(instance.id, instance.token);
+      const gen = await apiService.generateToken(instance.id);
+      const sessionToken = gen.data?.token || '';
+
+      if (gen.status !== 'success' || !sessionToken) {
+        alert('Erro ao gerar token da sessão');
+        setInstances((prev) =>
+          prev.map((i) =>
+            i.id === instance.id ? { ...i, status: 'disconnected' } : i
+          )
+        );
+        return;
+      }
+
+      const response = await apiService.startInstance(instance.id, sessionToken);
 
       if (response.status === 'success') {
-        const sessionToken = response.data?.token || '';
         setSelectedQrInstance(instance);
         setQrCodeData(null);
         setShowQrCode(true);
