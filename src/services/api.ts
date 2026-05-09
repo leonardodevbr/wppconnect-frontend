@@ -290,15 +290,21 @@ class ApiService {
 
   async getInstanceQrCode(sessionName: string, _token: string): Promise<ApiResponse<any>> {
     try {
-      // Usar a API oficial do WPPConnect que retorna status real
-      const response = await this.api.get(`/${sessionName}/qrcode-session`, {
-        responseType: 'arraybuffer' // Para lidar com PNG
-      });
-      
+      // Gerar token para autenticar
+      const gen = await this.generateToken(sessionName);
+      const bearerToken = gen.data?.token || '';
+
+      const response = await this.api.get(
+        `/${encodeURIComponent(sessionName)}/qrcode-session`,
+        {
+          headers: bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {},
+          responseType: 'arraybuffer',
+        }
+      );
+
       const body = response.data as ArrayBuffer;
 
-      // Se retornou imagem PNG, converter para base64
-      if (response.headers['content-type'] === 'image/png') {
+      if (response.headers['content-type']?.includes('image/png')) {
         const base64 = btoa(
           new Uint8Array(body).reduce(
             (data, byte) => data + String.fromCharCode(byte),
@@ -309,65 +315,55 @@ class ApiService {
           status: 'success',
           data: {
             qrcode: `data:image/png;base64,${base64}`,
-            sessionStatus: 'QRCODE'
-          }
+            sessionStatus: 'QRCODE',
+          },
         };
       }
-      
-      // Se retornou JSON com status
-      const jsonData = JSON.parse(
-        new TextDecoder().decode(new Uint8Array(body))
-      ) as {
-        status?: string;
-        message?: string;
-      };
+
+      const jsonData = JSON.parse(new TextDecoder().decode(new Uint8Array(body)));
       return {
         status: 'success',
-        data: {
-          status: jsonData.status,
-          message: jsonData.message,
-          sessionStatus: jsonData.status
-        }
+        data: { status: jsonData.status, sessionStatus: jsonData.status },
       };
     } catch (error: any) {
-      // Se o erro tem uma resposta JSON
-      if (error.response && error.response.data) {
-        try {
-          const jsonError = JSON.parse(
-            new TextDecoder().decode(new Uint8Array(error.response.data))
-          ) as {
-            message?: string;
-          };
-          return { status: 'error', message: jsonError.message || 'Erro ao obter QR Code' };
-        } catch {
-          return { status: 'error', message: 'QR Code não disponível' };
-        }
-      }
-      return { status: 'error', message: error.response?.data?.message || 'Erro ao obter QR Code' };
+      return { status: 'error', message: 'QR Code não disponível ainda' };
     }
   }
 
-  async startInstance(sessionName: string, token: string): Promise<ApiResponse<any>> {
+  async startInstance(sessionName: string, _token: string): Promise<ApiResponse<any>> {
     try {
-      const response = await this.api.post(
-        `/${encodeURIComponent(sessionName)}/start`,
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          timeout: 120000,
-        }
-      );
-      
-      console.log('Resposta raw do backend:', response.data);
-      
-      // O backend já retorna { status, message, data }
-      // Precisamos retornar como está
-      return response.data;
+      // Gerar token da sessão WPPConnect (necessário para autenticar o start-session)
+      const gen = await this.generateToken(sessionName);
+      if (gen.status !== 'success' || !gen.data?.token) {
+        return { status: 'error', message: 'Erro ao gerar token da sessão' };
+      }
+
+      const bearerToken = gen.data.token;
+
+      // Disparar start-session sem aguardar (fire and forget)
+      this.api
+        .post(
+          `/${encodeURIComponent(sessionName)}/start-session`,
+          { waitQrCode: false, webhook: '' },
+          {
+            headers: { Authorization: `Bearer ${bearerToken}` },
+            timeout: 10000,
+          }
+        )
+        .catch(() => {});
+
+      // Aguardar Chromium inicializar
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      return {
+        status: 'success',
+        data: { name: sessionName, status: 'INITIALIZING', qrcode: null },
+      };
     } catch (error: any) {
-      console.error('Erro na chamada de startInstance:', error);
-      return { status: 'error', message: error.response?.data?.message || 'Erro ao iniciar instância' };
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Erro ao iniciar instância',
+      };
     }
   }
 
