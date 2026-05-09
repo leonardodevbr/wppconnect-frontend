@@ -100,6 +100,7 @@ const Dashboard: React.FC = () => {
     setQrPollingRef(null);
     setQrPollingInstance(instanceId);
 
+    const pollingStartTime = Date.now();
     let attempts = 0;
     const maxAttempts = 20;
 
@@ -115,7 +116,10 @@ const Dashboard: React.FC = () => {
           instanceId,
           sessionToken
         );
-        if (statusResponse.data?.status === 'CONNECTED') {
+        if (
+          Date.now() - pollingStartTime >= 3000 &&
+          statusResponse.data?.status === 'CONNECTED'
+        ) {
           clearInterval(poll);
           qrPollingIntervalRef.current = null;
           setQrPollingRef(null);
@@ -138,6 +142,7 @@ const Dashboard: React.FC = () => {
           return;
         }
         if (
+          Date.now() - pollingStartTime >= 3000 &&
           qrResponse.status === 'success' &&
           (qrResponse.data?.sessionStatus === 'CONNECTED' ||
             qrResponse.data?.status === 'CONNECTED')
@@ -268,6 +273,11 @@ const Dashboard: React.FC = () => {
   const startInstance = async (instance: Instance) => {
     if (loadingInstances[instance.id]) return;
 
+    if (instance.status === 'connected') {
+      alert('Esta instância já está conectada!');
+      return;
+    }
+
     setLoadingInstances((prev) => ({ ...prev, [instance.id]: true }));
     setInstances((prev) =>
       prev.map((i) =>
@@ -374,6 +384,13 @@ const Dashboard: React.FC = () => {
   };
 
   const showQrCodeForInstance = async (instance: Instance) => {
+    if (instance.status === 'connected') {
+      alert(
+        'Instância já conectada. Escaneie o QR apenas se quiser reconectar.'
+      );
+      return;
+    }
+
     setSelectedQrInstance(instance);
     setQrCodeData(null);
     setShowQrCode(true);
