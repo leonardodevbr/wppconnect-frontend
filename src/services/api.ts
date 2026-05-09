@@ -215,16 +215,60 @@ class ApiService {
     }
   }
 
-  // Gerenciamento de Instâncias
+  // Gerenciamento de Instâncias — create-instance no Mongo + start-session (WPPConnect / QR)
   async createInstance(name: string, webhook?: string): Promise<ApiResponse<any>> {
+    const session = name.trim();
     try {
-      const response = await this.api.post('/create-instance', {
-        name: name,
-        webhook: webhook
+      const createRes = await this.api.post('/create-instance', {
+        name: session,
+        webhook,
       });
-      return response.data;
+      if (!createRes.data?.success) {
+        return {
+          status: 'error',
+          message: createRes.data?.error || 'Erro ao criar instância',
+        };
+      }
+
+      const gen = await this.generateToken(session);
+      if (gen.status !== 'success' || !gen.data?.token) {
+        return {
+          status: 'error',
+          message: gen.message || 'Erro ao gerar token da sessão',
+        };
+      }
+
+      const bearerToken = gen.data.token;
+      await this.api.post(
+        `/${encodeURIComponent(session)}/start-session`,
+        { waitQrCode: true, webhook: webhook || '' },
+        {
+          headers: { Authorization: `Bearer ${bearerToken}` },
+          timeout: 120000,
+        }
+      );
+
+      const qr = await this.getInstanceQrCode(session, bearerToken);
+      const qrcode =
+        qr.status === 'success' && qr.data?.qrcode ? qr.data.qrcode : undefined;
+
+      return {
+        status: 'success',
+        data: {
+          name: session,
+          full: gen.data.full,
+          status: qr.data?.sessionStatus || qr.data?.status || 'QRCODE',
+          qrcode,
+        },
+      };
     } catch (error: any) {
-      return { status: 'error', message: error.response?.data?.message || 'Erro ao criar instância' };
+      const d = error.response?.data;
+      const msg =
+        d?.error ||
+        d?.message ||
+        error.message ||
+        'Erro ao criar instância';
+      return { status: 'error', message: msg };
     }
   }
 
