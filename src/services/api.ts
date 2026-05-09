@@ -290,10 +290,10 @@ class ApiService {
 
   async getSessionStatus(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
-      const response = await this.api.get(`/${sessionName}/status-session`, {
+      const response = await this.api.get(`/instances/${sessionName}/status`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      return { status: 'success', data: response.data };
+      return { status: 'success', data: response.data.data };
     } catch (error: any) {
       return { status: 'error', message: 'Erro ao verificar status' };
     }
