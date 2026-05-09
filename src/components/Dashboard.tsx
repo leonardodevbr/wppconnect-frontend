@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import apiService from '../services/api';
 import {
@@ -17,8 +17,6 @@ import {
   QuestionMarkCircleIcon,
   ExclamationTriangleIcon,
   QrCodeIcon,
-  ArrowPathIcon,
-  TrashIcon,
 } from '@heroicons/react/24/outline';
 
 // Tipos inline para evitar problemas de importação
@@ -63,10 +61,92 @@ const Dashboard: React.FC = () => {
   const [showQrCode, setShowQrCode] = useState(false);
   const [qrCodeData, setQrCodeData] = useState<string | null>(null);
   const [loadingInstances, setLoadingInstances] = useState<Record<string, boolean>>({});
+  const [qrPollingInstance, setQrPollingInstance] = useState<string | null>(null);
+  const [selectedQrInstance, setSelectedQrInstance] = useState<Instance | null>(null);
+  const [qrPollingRef, setQrPollingRef] = useState<ReturnType<typeof setInterval> | null>(null);
+  const qrPollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (qrPollingIntervalRef.current !== null) {
+        clearInterval(qrPollingIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const closeQrModal = () => {
+    if (qrPollingIntervalRef.current !== null) {
+      clearInterval(qrPollingIntervalRef.current);
+      qrPollingIntervalRef.current = null;
+    }
+    if (qrPollingRef) clearInterval(qrPollingRef);
+    setQrPollingRef(null);
+    setShowQrCode(false);
+    setQrCodeData(null);
+    setSelectedQrInstance(null);
+    setQrPollingInstance(null);
+  };
+
+  const startQrPolling = (instanceId: string) => {
+    if (qrPollingIntervalRef.current !== null) {
+      clearInterval(qrPollingIntervalRef.current);
+      qrPollingIntervalRef.current = null;
+    }
+    setQrPollingRef(null);
+    setQrPollingInstance(instanceId);
+
+    let attempts = 0;
+    const maxAttempts = 20;
+
+    const poll = setInterval(async () => {
+      attempts += 1;
+      try {
+        const qrResponse = await apiService.getInstanceQrCode(instanceId, '');
+
+        if (qrResponse.status === 'success' && qrResponse.data?.qrcode) {
+          setQrCodeData(qrResponse.data.qrcode);
+          clearInterval(poll);
+          qrPollingIntervalRef.current = null;
+          setQrPollingRef(null);
+          return;
+        }
+        if (
+          qrResponse.status === 'success' &&
+          (qrResponse.data?.sessionStatus === 'CONNECTED' ||
+            qrResponse.data?.status === 'CONNECTED')
+        ) {
+          clearInterval(poll);
+          qrPollingIntervalRef.current = null;
+          setQrPollingRef(null);
+          setShowQrCode(false);
+          setInstances((prev) =>
+            prev.map((i) =>
+              i.id === instanceId ? { ...i, status: 'connected' } : i
+            )
+          );
+          setSelectedQrInstance(null);
+          setQrPollingInstance(null);
+          alert('✅ WhatsApp conectado com sucesso!');
+        }
+      } catch {
+        // ignorar erros de polling
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(poll);
+        qrPollingIntervalRef.current = null;
+        setQrPollingRef(null);
+        setQrCodeData(null);
+      }
+    }, 3000);
+
+    qrPollingIntervalRef.current = poll;
+    setQrPollingRef(poll);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -163,71 +243,78 @@ const Dashboard: React.FC = () => {
   };
 
   const startInstance = async (instance: Instance) => {
-    const key = instance.id;
-    setLoadingInstances((prev) => ({ ...prev, [key]: true }));
+    if (loadingInstances[instance.id]) return;
+
+    setLoadingInstances((prev) => ({ ...prev, [instance.id]: true }));
+    setInstances((prev) =>
+      prev.map((i) =>
+        i.id === instance.id ? { ...i, status: 'connecting' } : i
+      )
+    );
+
     try {
       const response = await apiService.startInstance(instance.id, instance.token);
-      
-      console.log('Resposta completa do startInstance:', response);
-      console.log('Dados da resposta:', response.data);
-      
+
       if (response.status === 'success') {
-        setInstances(prev => prev.map(i => 
-          i.id === instance.id 
-            ? { ...i, status: response.data?.status === 'CONNECTED' ? 'connected' : 'connecting' }
-            : i
-        ));
-        
-        // Se tem QR Code, mostrar
-        if (response.data && response.data.qrcode) {
-          console.log('QR Code recebido:', response.data.qrcode);
-          setQrCodeData(response.data.qrcode);
-          setShowQrCode(true);
-        } else {
-          console.log('Sem QR Code na resposta');
-        }
-        
-        alert('Instância iniciada com sucesso!');
+        setSelectedQrInstance(instance);
+        setQrCodeData(null);
+        setShowQrCode(true);
+        startQrPolling(instance.id);
       } else {
         alert(`Erro ao iniciar instância: ${response.message}`);
+        setInstances((prev) =>
+          prev.map((i) =>
+            i.id === instance.id ? { ...i, status: 'disconnected' } : i
+          )
+        );
       }
     } catch (error) {
       console.error('Erro ao iniciar instância:', error);
-      alert('Erro ao iniciar instância');
+      setInstances((prev) =>
+        prev.map((i) =>
+          i.id === instance.id ? { ...i, status: 'disconnected' } : i
+        )
+      );
     } finally {
-      setLoadingInstances((prev) => ({ ...prev, [key]: false }));
+      setLoadingInstances((prev) => ({ ...prev, [instance.id]: false }));
     }
   };
 
   const deleteInstance = async (instance: Instance) => {
-    if (!confirm(`Excluir a instância "${instance.name}"?`)) return;
+    if (
+      !confirm(
+        `Excluir a instância "${instance.name}"? Esta ação não pode ser desfeita.`
+      )
+    )
+      return;
 
     try {
       const response = await apiService.deleteInstance(instance.id);
       if (response.status === 'success') {
+        if (selectedQrInstance?.id === instance.id) {
+          closeQrModal();
+        }
         setInstances((prev) => prev.filter((i) => i.id !== instance.id));
-        setStats((prev) => {
-          const newTotal = Math.max(0, prev.totalInstances - 1);
-          const newConnected =
+        setStats((prev) => ({
+          ...prev,
+          totalInstances: Math.max(0, prev.totalInstances - 1),
+          disconnectedInstances:
+            instance.status !== 'connected'
+              ? Math.max(0, prev.disconnectedInstances - 1)
+              : prev.disconnectedInstances,
+          connectedInstances:
             instance.status === 'connected'
               ? Math.max(0, prev.connectedInstances - 1)
-              : prev.connectedInstances;
-          return {
-            ...prev,
-            totalInstances: newTotal,
-            connectedInstances: newConnected,
-            disconnectedInstances: newTotal - newConnected,
-          };
-        });
+              : prev.connectedInstances,
+        }));
         if (selectedInstance?.id === instance.id) {
           setShowInstanceDetails(false);
           setSelectedInstance(null);
         }
       } else {
-        alert(response.message || 'Erro ao excluir instância');
+        alert(`Erro ao excluir: ${response.message}`);
       }
     } catch (error) {
-      console.error('Erro ao excluir instância:', error);
       alert('Erro ao excluir instância');
     }
   };
@@ -250,27 +337,11 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const showQrCodeForInstance = async (instance: Instance) => {
-    try {
-      // qrcode-session não precisa de token real
-      const response = await apiService.getInstanceQrCode(instance.id, '');
-      
-      if (response.status === 'success' && response.data && response.data.qrcode) {
-        // Verificar se o QR Code é válido (não é apenas 1 pixel)
-        const qrcode = response.data.qrcode;
-        if (qrcode.length > 100) {
-          setQrCodeData(qrcode);
-          setShowQrCode(true);
-        } else {
-          alert('QR Code não disponível ainda. Tente iniciar a instância primeiro.');
-        }
-      } else {
-        alert('QR Code não disponível para esta instância');
-      }
-    } catch (error) {
-      console.error('Erro ao obter QR Code:', error);
-      alert('Erro ao obter QR Code');
-    }
+  const showQrCodeForInstance = (instance: Instance) => {
+    setSelectedQrInstance(instance);
+    setQrCodeData(null);
+    setShowQrCode(true);
+    startQrPolling(instance.id);
   };
 
   const openInstanceDetails = async (instance: Instance) => {
@@ -612,8 +683,18 @@ const Dashboard: React.FC = () => {
                           <div className="text-sm font-medium text-gray-900">{instance.name}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={instance.status === 'connected' ? 'status-connected' : 'status-disconnected'}>
-                            {instance.status === 'connected' ? 'Conectada' : 'Desconectada'}
+                          <span
+                            className={
+                              instance.status === 'connected'
+                                ? 'status-connected'
+                                : 'status-disconnected'
+                            }
+                          >
+                            {instance.status === 'connected'
+                              ? 'Conectada'
+                              : instance.status === 'connecting'
+                                ? 'Conectando...'
+                                : 'Desconectada'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -644,16 +725,39 @@ const Dashboard: React.FC = () => {
                             ) : (
                               <button
                                 type="button"
-                                disabled={loadingInstances[instance.id]}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   startInstance(instance);
                                 }}
-                                className="btn-success flex items-center space-x-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                                disabled={loadingInstances[instance.id]}
+                                className={`btn-success flex items-center space-x-1 ${
+                                  loadingInstances[instance.id]
+                                    ? 'opacity-60 cursor-not-allowed'
+                                    : ''
+                                }`}
                               >
                                 {loadingInstances[instance.id] ? (
                                   <>
-                                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                    <svg
+                                      className="animate-spin w-4 h-4"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      aria-hidden
+                                    >
+                                      <circle
+                                        className="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        strokeWidth="4"
+                                      />
+                                      <path
+                                        className="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8v8z"
+                                      />
+                                    </svg>
                                     <span>Iniciando...</span>
                                   </>
                                 ) : (
@@ -679,15 +783,29 @@ const Dashboard: React.FC = () => {
                             )}
                             <button
                               type="button"
-                              title="Excluir instância"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 deleteInstance(instance);
                               }}
-                              className="btn-danger flex items-center justify-center p-2"
-                              aria-label="Excluir instância"
+                              className="btn-danger flex items-center space-x-1"
+                              title="Excluir instância"
                             >
-                              <TrashIcon className="w-4 h-4" />
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="w-4 h-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                aria-hidden
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                              <span>Excluir</span>
                             </button>
                           </div>
                         </td>
@@ -1078,31 +1196,93 @@ const Dashboard: React.FC = () => {
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <div className="mt-3">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">QR Code para Conectar WhatsApp</h3>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Conectar WhatsApp
+                  {selectedQrInstance && (
+                    <span className="text-sm text-gray-500 ml-2">
+                      — {selectedQrInstance.name}
+                    </span>
+                  )}
+                  {qrPollingInstance ? (
+                    <span className="sr-only">Polling ativo</span>
+                  ) : null}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeQrModal}
+                  className="text-gray-400 hover:text-gray-600 text-2xl font-bold"
+                  aria-label="Fechar"
+                >
+                  ×
+                </button>
+              </div>
+
               <div className="text-center mb-4">
                 <p className="text-sm text-gray-600 mb-4">
-                  Escaneie este QR Code com seu WhatsApp para conectar a instância
+                  Abra o WhatsApp → Menu → Dispositivos Conectados → Conectar
+                  dispositivo
                 </p>
+
                 {qrCodeData && qrCodeData.length > 100 ? (
                   <div className="flex justify-center">
-                    <img 
-                      src={qrCodeData} 
-                      alt="QR Code para conectar WhatsApp" 
+                    <img
+                      src={qrCodeData}
+                      alt="QR Code"
                       className="border-2 border-gray-300 rounded-lg shadow-lg mx-auto"
-                      style={{ width: '280px', height: '280px', display: 'block' }}
+                      style={{ width: '280px', height: '280px' }}
                     />
                   </div>
                 ) : (
-                  <div className="flex justify-center items-center bg-gray-100 rounded-lg mx-auto" style={{ width: '280px', height: '280px', border: '2px dashed #ccc' }}>
-                    <p className="text-gray-500 text-sm text-center px-4">QR Code não disponível ainda. Tente iniciar a instância primeiro.</p>
+                  <div
+                    className="flex flex-col justify-center items-center bg-gray-100 rounded-lg mx-auto gap-3"
+                    style={{
+                      width: '280px',
+                      height: '280px',
+                      border: '2px dashed #ccc',
+                    }}
+                  >
+                    <svg
+                      className="animate-spin w-8 h-8 text-blue-500"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      aria-hidden
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v8z"
+                      />
+                    </svg>
+                    <p className="text-gray-500 text-sm text-center px-4">
+                      Aguardando QR Code...
+                    </p>
                   </div>
                 )}
               </div>
-              <div className="flex justify-end space-x-3">
+
+              <div className="flex justify-between items-center mt-4">
                 <button
-                  onClick={() => setShowQrCode(false)}
-                  className="btn-secondary"
+                  type="button"
+                  onClick={() => {
+                    if (selectedQrInstance) {
+                      setQrCodeData(null);
+                      startQrPolling(selectedQrInstance.id);
+                    }
+                  }}
+                  className="btn-secondary text-sm"
                 >
+                  🔄 Atualizar QR
+                </button>
+                <button type="button" onClick={closeQrModal} className="btn-secondary">
                   Fechar
                 </button>
               </div>

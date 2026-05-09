@@ -382,7 +382,7 @@ class ApiService {
 
   async deleteInstance(sessionName: string): Promise<ApiResponse<any>> {
     try {
-      const response = await this.api.delete(`/instances/${encodeURIComponent(sessionName)}`);
+      const response = await this.api.delete(`/instances/${sessionName}`);
       return response.data;
     } catch (error: any) {
       return {
