@@ -12,19 +12,6 @@ interface User {
   createdAt: string;
 }
 
-interface Instance {
-  id: string;
-  name: string;
-  status: 'connected' | 'disconnected' | 'connecting';
-  token: string;
-  createdAt: string;
-  messages: {
-    sent: number;
-    received: number;
-  };
-  webhook?: string;
-}
-
 interface Stats {
   totalInstances: number;
   connectedInstances: number;
@@ -36,11 +23,6 @@ interface Stats {
 interface LoginCredentials {
   email: string;
   password: string;
-}
-
-interface CreateInstanceData {
-  name: string;
-  webhook?: string;
 }
 
 interface ApiResponse<T = any> {
@@ -200,7 +182,7 @@ class ApiService {
   }
 
   // Configurações de Instância
-  async getInstanceConfig(sessionName: string, token: string): Promise<ApiResponse<any>> {
+  async getInstanceConfig(sessionName: string, _token: string): Promise<ApiResponse<any>> {
     try {
       const response = await this.api.get(`/${sessionName}/config`);
       return response.data;
@@ -222,7 +204,7 @@ class ApiService {
     }
   }
 
-  async setInstanceWebhook(sessionName: string, token: string, webhookUrl: string): Promise<ApiResponse<any>> {
+  async setInstanceWebhook(sessionName: string, _token: string, webhookUrl: string): Promise<ApiResponse<any>> {
     try {
       const response = await this.api.post(`/${sessionName}/webhook`, {
         url: webhookUrl
@@ -255,16 +237,23 @@ class ApiService {
     }
   }
 
-  async getInstanceQrCode(sessionName: string, token: string): Promise<ApiResponse<any>> {
+  async getInstanceQrCode(sessionName: string, _token: string): Promise<ApiResponse<any>> {
     try {
       // Usar a API oficial do WPPConnect que retorna status real
       const response = await this.api.get(`/${sessionName}/qrcode-session`, {
         responseType: 'arraybuffer' // Para lidar com PNG
       });
       
+      const body = response.data as ArrayBuffer;
+
       // Se retornou imagem PNG, converter para base64
       if (response.headers['content-type'] === 'image/png') {
-        const base64 = Buffer.from(response.data, 'binary').toString('base64');
+        const base64 = btoa(
+          new Uint8Array(body).reduce(
+            (data, byte) => data + String.fromCharCode(byte),
+            ''
+          )
+        );
         return {
           status: 'success',
           data: {
@@ -275,7 +264,12 @@ class ApiService {
       }
       
       // Se retornou JSON com status
-      const jsonData = JSON.parse(Buffer.from(response.data).toString());
+      const jsonData = JSON.parse(
+        new TextDecoder().decode(new Uint8Array(body))
+      ) as {
+        status?: string;
+        message?: string;
+      };
       return {
         status: 'success',
         data: {
@@ -288,7 +282,11 @@ class ApiService {
       // Se o erro tem uma resposta JSON
       if (error.response && error.response.data) {
         try {
-          const jsonError = JSON.parse(Buffer.from(error.response.data).toString());
+          const jsonError = JSON.parse(
+            new TextDecoder().decode(new Uint8Array(error.response.data))
+          ) as {
+            message?: string;
+          };
           return { status: 'error', message: jsonError.message || 'Erro ao obter QR Code' };
         } catch {
           return { status: 'error', message: 'QR Code não disponível' };
