@@ -288,19 +288,12 @@ class ApiService {
     }
   }
 
-  async getInstanceQrCode(sessionName: string, _token: string): Promise<ApiResponse<any>> {
+  async getInstanceQrCode(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
-      // Gerar token para autenticar
-      const gen = await this.generateToken(sessionName);
-      const bearerToken = gen.data?.token || '';
-
-      const response = await this.api.get(
-        `/${encodeURIComponent(sessionName)}/qrcode-session`,
-        {
-          headers: bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {},
-          responseType: 'arraybuffer',
-        }
-      );
+      const response = await this.api.get(`/${sessionName}/qrcode-session`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        responseType: 'arraybuffer',
+      });
 
       const body = response.data as ArrayBuffer;
 
@@ -332,7 +325,6 @@ class ApiService {
 
   async startInstance(sessionName: string, _token: string): Promise<ApiResponse<any>> {
     try {
-      // Gerar token da sessão WPPConnect (necessário para autenticar o start-session)
       const gen = await this.generateToken(sessionName);
       if (gen.status !== 'success' || !gen.data?.token) {
         return { status: 'error', message: 'Erro ao gerar token da sessão' };
@@ -340,7 +332,7 @@ class ApiService {
 
       const bearerToken = gen.data.token;
 
-      // Disparar start-session sem aguardar (fire and forget)
+      // Fire and forget — não aguardar resposta
       this.api
         .post(
           `/${encodeURIComponent(sessionName)}/start-session`,
@@ -352,18 +344,20 @@ class ApiService {
         )
         .catch(() => {});
 
-      // Aguardar Chromium inicializar
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      // Aguardar Chromium inicializar no Railway (~20s)
+      await new Promise((resolve) => setTimeout(resolve, 20000));
 
       return {
         status: 'success',
-        data: { name: sessionName, status: 'INITIALIZING', qrcode: null },
+        data: {
+          name: sessionName,
+          status: 'INITIALIZING',
+          qrcode: null,
+          token: bearerToken,
+        },
       };
     } catch (error: any) {
-      return {
-        status: 'error',
-        message: error.response?.data?.message || 'Erro ao iniciar instância',
-      };
+      return { status: 'error', message: error.message || 'Erro ao iniciar instância' };
     }
   }
 

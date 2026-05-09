@@ -91,7 +91,7 @@ const Dashboard: React.FC = () => {
     setQrPollingInstance(null);
   };
 
-  const startQrPolling = (instanceId: string) => {
+  const startQrPolling = (instanceId: string, sessionToken: string) => {
     if (qrPollingIntervalRef.current !== null) {
       clearInterval(qrPollingIntervalRef.current);
       qrPollingIntervalRef.current = null;
@@ -105,7 +105,10 @@ const Dashboard: React.FC = () => {
     const poll = setInterval(async () => {
       attempts += 1;
       try {
-        const qrResponse = await apiService.getInstanceQrCode(instanceId, '');
+        const qrResponse = await apiService.getInstanceQrCode(
+          instanceId,
+          sessionToken
+        );
 
         if (qrResponse.status === 'success' && qrResponse.data?.qrcode) {
           setQrCodeData(qrResponse.data.qrcode);
@@ -256,10 +259,11 @@ const Dashboard: React.FC = () => {
       const response = await apiService.startInstance(instance.id, instance.token);
 
       if (response.status === 'success') {
+        const sessionToken = response.data?.token || '';
         setSelectedQrInstance(instance);
         setQrCodeData(null);
         setShowQrCode(true);
-        startQrPolling(instance.id);
+        startQrPolling(instance.id, sessionToken);
       } else {
         alert(`Erro ao iniciar instância: ${response.message}`);
         setInstances((prev) =>
@@ -337,11 +341,13 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const showQrCodeForInstance = (instance: Instance) => {
+  const showQrCodeForInstance = async (instance: Instance) => {
     setSelectedQrInstance(instance);
     setQrCodeData(null);
     setShowQrCode(true);
-    startQrPolling(instance.id);
+    const gen = await apiService.generateToken(instance.id);
+    const sessionToken = gen.data?.token || '';
+    startQrPolling(instance.id, sessionToken);
   };
 
   const openInstanceDetails = async (instance: Instance) => {
@@ -1272,11 +1278,14 @@ const Dashboard: React.FC = () => {
               <div className="flex justify-between items-center mt-4">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selectedQrInstance) {
-                      setQrCodeData(null);
-                      startQrPolling(selectedQrInstance.id);
-                    }
+                  onClick={async () => {
+                    if (!selectedQrInstance) return;
+                    setQrCodeData(null);
+                    const gen = await apiService.generateToken(
+                      selectedQrInstance.id
+                    );
+                    const sessionToken = gen.data?.token || '';
+                    startQrPolling(selectedQrInstance.id, sessionToken);
                   }}
                   className="btn-secondary text-sm"
                 >
