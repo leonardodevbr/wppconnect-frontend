@@ -290,16 +290,19 @@ class ApiService {
 
   async getInstanceQrCode(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
+      // Tentar como JSON primeiro
       const response = await this.api.get(`/${sessionName}/qrcode-session`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         responseType: 'arraybuffer',
+        timeout: 15000,
       });
 
-      const body = response.data as ArrayBuffer;
+      const contentType = response.headers['content-type'] || '';
 
-      if (response.headers['content-type']?.includes('image/png')) {
+      if (contentType.includes('image/png') || contentType.includes('image/jpeg')) {
+        // É uma imagem — converter para base64
         const base64 = btoa(
-          new Uint8Array(body).reduce(
+          new Uint8Array(response.data as ArrayBuffer).reduce(
             (data, byte) => data + String.fromCharCode(byte),
             ''
           )
@@ -313,10 +316,21 @@ class ApiService {
         };
       }
 
-      const jsonData = JSON.parse(new TextDecoder().decode(new Uint8Array(body)));
+      // É JSON — decodificar e verificar status
+      const text = new TextDecoder().decode(new Uint8Array(response.data as ArrayBuffer));
+      const json = JSON.parse(text);
+
+      if (json.qrcode && json.qrcode.startsWith('data:image')) {
+        // QR em base64 já embutido no JSON
+        return {
+          status: 'success',
+          data: { qrcode: json.qrcode, sessionStatus: 'QRCODE' },
+        };
+      }
+
       return {
         status: 'success',
-        data: { status: jsonData.status, sessionStatus: jsonData.status },
+        data: { status: json.status || json.message, sessionStatus: json.status },
       };
     } catch (error: any) {
       return { status: 'error', message: 'QR Code não disponível ainda' };
@@ -344,8 +358,8 @@ class ApiService {
         )
         .catch(() => {});
 
-      // Aguardar Chromium inicializar no Railway (~20s)
-      await new Promise((resolve) => setTimeout(resolve, 20000));
+      // Aguardar Chromium inicializar no Railway (~25s)
+      await new Promise((resolve) => setTimeout(resolve, 25000));
 
       return {
         status: 'success',
