@@ -288,6 +288,17 @@ class ApiService {
     }
   }
 
+  async getSessionStatus(sessionName: string, token: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await this.api.get(`/${sessionName}/status-session`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      return { status: 'success', data: response.data };
+    } catch (error: any) {
+      return { status: 'error', message: 'Erro ao verificar status' };
+    }
+  }
+
   async getInstanceQrCode(sessionName: string, token: string): Promise<ApiResponse<any>> {
     try {
       // Tentar como JSON primeiro

@@ -89,6 +89,7 @@ const Dashboard: React.FC = () => {
     setQrCodeData(null);
     setSelectedQrInstance(null);
     setQrPollingInstance(null);
+    loadData();
   };
 
   const startQrPolling = (instanceId: string, sessionToken: string) => {
@@ -109,6 +110,25 @@ const Dashboard: React.FC = () => {
           instanceId,
           sessionToken
         );
+
+        const statusResponse = await apiService.getSessionStatus(
+          instanceId,
+          sessionToken
+        );
+        if (statusResponse.data?.status === 'CONNECTED') {
+          clearInterval(poll);
+          qrPollingIntervalRef.current = null;
+          setQrPollingRef(null);
+          setShowQrCode(false);
+          setInstances((prev) =>
+            prev.map((i) =>
+              i.id === instanceId ? { ...i, status: 'connected' } : i
+            )
+          );
+          setSelectedQrInstance(null);
+          setQrPollingInstance(null);
+          return;
+        }
 
         if (qrResponse.status === 'success' && qrResponse.data?.qrcode) {
           setQrCodeData(qrResponse.data.qrcode);
